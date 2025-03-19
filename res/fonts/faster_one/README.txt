@@ -1,0 +1,1 @@
+This font was downloaded from: https://fonts.google.com/specimen/Faster+One
