@@ -2,25 +2,21 @@ import os
 import pygame
 from pygame.font import FontType
 
+from classes.Ball import Ball
+from classes.Paddle import Paddle
+
 pygame.init()
 
-# INITIALS
 WIDTH, HEIGHT = 1000, 600
 pygame.display.set_caption("PingPong")
 window = pygame.display.set_mode((WIDTH, HEIGHT))
 is_game_running: bool = True
 is_game_over: bool = False
 
-# paddle dimensions
-paddle_width, paddle_height = 20, 120
-left_paddle_y = right_paddle_y = HEIGHT / 2 - paddle_height / 2
-left_paddle_x, right_paddle_x = 100 - paddle_width / 2, WIDTH - (100 - paddle_width / 2)
-left_paddle_vel, right_paddle_vel = 0, 0
+left_paddle = Paddle(pygame.Color("red"), 20, 120, 0, 80, (HEIGHT - 120) / 2)
+right_paddle = Paddle(pygame.Color("blue"), 20, 120, 0, WIDTH - 80 - 20, (HEIGHT - 120) / 2)
+ball = Ball(pygame.Color("white"), 15, WIDTH / 2 - 15, HEIGHT / 2 - 15, 0.5, 0.5)
 
-# for the ball
-radius = 15
-ball_x, ball_y = WIDTH / 2 - radius, HEIGHT / 2 - radius
-ball_vel_x, ball_vel_y = 0.7, 0.7
 game_over_font: FontType
 
 try:
@@ -28,26 +24,17 @@ try:
 except FileNotFoundError:
     game_over_font = pygame.font.SysFont(None, 80)
 
+
 def game_over():
-    global is_game_running
     window.fill(pygame.Color("black"))
     game_over_text = game_over_font.render("Game over!", False, pygame.Color("red"))
     window.blit(game_over_text, ((WIDTH - game_over_text.get_width()) / 2, (HEIGHT - game_over_text.get_height()) / 2))
     pygame.display.update()
 
+
 def main():
     global is_game_over
     global is_game_running
-    global  ball_x
-    global ball_y
-    global ball_vel_x
-    global ball_vel_y
-    global right_paddle_vel
-    global left_paddle_vel
-    global left_paddle_x
-    global left_paddle_y
-    global right_paddle_x
-    global right_paddle_y
 
     while is_game_running:
         if is_game_over:
@@ -59,65 +46,77 @@ def main():
                     is_game_running = False
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_UP:
-                        right_paddle_vel = -0.9
+                        right_paddle.velocity = -0.7
                     if event.key == pygame.K_DOWN:
-                        right_paddle_vel = 0.9
+                        right_paddle.velocity = 0.7
                 elif event.type == pygame.KEYUP:
-                    right_paddle_vel = 0
-                    left_paddle_vel = 0
+                    right_paddle.velocity = 0
+                    right_paddle.velocity = 0
 
             # ball movement controls
-            if ball_x <= 0 + radius or ball_x >= WIDTH - radius:
+            if ball.x <= 0 + ball.radius or ball.x >= WIDTH - ball.radius:
                 is_game_over = True
 
-            if ball_y <= 0 + radius or ball_y >= HEIGHT - radius:
-                ball_vel_y *= -1
+            if ball.y <= 0 + ball.radius or ball.rect.y >= HEIGHT - ball.radius:
+                ball.y_velocity *= -1
 
-            # paddle movement controls
-            if left_paddle_y >= HEIGHT - paddle_height:
-                left_paddle_y = HEIGHT - paddle_height
-            if left_paddle_y <= 0:
-                left_paddle_y = 0
+            # make sure paddle does not go outside the window
+            if left_paddle.x + left_paddle.height > HEIGHT:
+                left_paddle.x = HEIGHT - left_paddle.height
+            if left_paddle.x < 0:
+                left_paddle.y = 0
 
-            if right_paddle_y >= HEIGHT - paddle_height:
-                right_paddle_y = HEIGHT - paddle_height
-            if right_paddle_y <= 0:
-                right_paddle_y = 0
+            if right_paddle.x + right_paddle.height > HEIGHT:
+                right_paddle.rect.top = HEIGHT - right_paddle.rect.height
+            if right_paddle.y < 0:
+                right_paddle.y = 0
 
-            # paddle collisions
-            # left paddle
-            if left_paddle_x <= ball_x <= left_paddle_x + paddle_width:
-                if left_paddle_y <= ball_y <= left_paddle_y + paddle_height:
-                    ball_vel_x *= -1
+            # check if paddle and ball collide
 
-            # right paddle
-            if right_paddle_x <= ball_x <= right_paddle_x + paddle_width:
-                if right_paddle_y <= ball_y <= right_paddle_y + paddle_height:
-                    ball_vel_x *= -1
+            ##################################################
+            # This code does not work
+            ##################################################
+            # if pygame.sprite.collide_rect(left_paddle, ball):
+            #     ball.x_velocity *= -1
+            #
+            # if pygame.sprite.collide_rect(ball, right_paddle):
+            #     ball.x_velocity *= -1
 
-            # movements
-            ball_x += ball_vel_x
-            ball_y += ball_vel_y
-            right_paddle_y += right_paddle_vel
-            left_paddle_y += left_paddle_vel
+            ##################################################
+            # This code does work
+            ##################################################
+            if left_paddle.x <= ball.x <= left_paddle.x + left_paddle.width:
+                if left_paddle.y <= ball.y <= left_paddle.y + left_paddle.height:
+                    ball.x_velocity *= -1
+
+            if right_paddle.x <= ball.x + 2 * ball.radius <= right_paddle.x:
+                if right_paddle.y <= ball.y <= right_paddle.y + right_paddle.height:
+                    ball.x_velocity *= -1
 
             # move left paddle based on ball location
-            if left_paddle_y + paddle_height / 2 <= ball_y:
-                if ball_x <= WIDTH / 2:
-                    left_paddle_vel = 0.9
-            elif left_paddle_y + paddle_height / 2 >= ball_y:
-                if ball_x <= WIDTH / 2:
-                    left_paddle_vel = -0.9
+            if ball.x <= WIDTH / 2:
+                if left_paddle.y + left_paddle.height / 2 < ball.y:
+                    left_paddle.velocity = 0.9
+                else:
+                    left_paddle.velocity = -0.9
+            else:
+                left_paddle.velocity = 0
 
             window.fill(pygame.Color("black"))
 
-            # OBJECTS
-            pygame.draw.circle(window, pygame.Color("white"), (ball_x, ball_y), radius)
-            pygame.draw.rect(window, pygame.Color("red"),
-                             pygame.Rect(right_paddle_x, right_paddle_y, paddle_width, paddle_height))
-            pygame.draw.rect(window, pygame.Color("red"),
-                             pygame.Rect(left_paddle_x, left_paddle_y, paddle_width, paddle_height))
+            # update positions
+            ball.update()
+            left_paddle.update()
+            right_paddle.update()
+
+            # draw objects
+            ball.draw(window)
+            left_paddle.draw(window)
+            right_paddle.draw(window)
+
+            # update screen
             pygame.display.update()
+
 
 if __name__ == '__main__':
     main()
