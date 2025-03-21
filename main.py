@@ -1,8 +1,8 @@
 import os
 import sys
 import pygame
-from classes.Ball import Ball
-from classes.Paddle import Paddle
+from src.classes.Ball import Ball
+from src.classes.Paddle import Paddle
 
 pygame.init()
 
