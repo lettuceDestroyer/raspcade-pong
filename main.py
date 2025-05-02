@@ -1,6 +1,7 @@
 import os
 import sys
 import torch
+from torchvision import transforms
 import pygame
 import pygame.camera
 from src.classes.Ball import Ball
@@ -19,6 +20,8 @@ left_paddle = Paddle(pygame.Color("red"), 20, 120, 0, 80, (HEIGHT - 120) / 2)
 right_paddle = Paddle(pygame.Color("blue"), 20, 120, 0, WIDTH - 80 - 20, (HEIGHT - 120) / 2)
 ball = Ball(pygame.Color("white"), 15, WIDTH / 2 - 15, HEIGHT / 2 - 15, 0.5, 0.5)
 
+model: any
+camera: pygame.camera.Camera
 game_over_font: pygame.font.Font
 
 def init():
@@ -38,8 +41,54 @@ def load_fonts():
     except FileNotFoundError:
         game_over_font = pygame.font.SysFont(None, 80)
 
+def load_model():
+    model = torch.load(MODEL_PATH, weights_only=False)
+    model.eval()
+
+def init_camera():
+    camera_list = pygame.camera.list_cameras()
+    if not camera_list:
+        raise ValueError("Sorry, no cameras detected.")
+    camera = pygame.camera.Camera(camera_list[0])
+    camera.start()
+
+def resize_image_and_bbox(img, bboxes, new_height, new_width):
+    original_width, original_height = img.size
+
+    height_factor = original_height / new_height
+    width_factor = original_width / new_width
+
+    transform = transforms.Compose([
+        transforms.Resize((new_height, new_width)),
+        transforms.ToTensor()
+    ])
+    img_as_tensor = transform(img)
+
+    # Scale x coordinates
+    bboxes[:, [0, 2]] = bboxes[:, [0, 2]] / width_factor
+    # Scale y coordinates
+    bboxes[:, [1, 3]] = bboxes[:, [1, 3]] / height_factor
+
+    return img_as_tensor, bboxes
+
+def surfact_to_tensor(surface: pygame.Surface):
+    # Use surfarray to get the pixel data
+    pixel_array = pygame.surfarray.pixels3d(surface)
+    # Convert the numpy array to a PyTorch tensor
+    tensor = torch.tensor(pixel_array, dtype=torch.float32)
+    # If needed, permute the dimensions to match the typical (C, H, W) format
+    tensor = tensor.permute(2, 0, 1)
+    # Should print torch.Size([3, .., ..])
+    print(tensor.shape)
+    return tensor
+
 def main():
     global is_game_over
+
+    init()
+    init_camera()
+    load_fonts()
+    load_model()
 
     while True:
         if is_game_over:
@@ -58,6 +107,15 @@ def main():
                 elif event.type == pygame.KEYUP:
                     right_paddle.velocity = 0
                     right_paddle.velocity = 0
+
+            image_as_surface = camera.get_image()
+            image_as_tensor = surfact_to_tensor(image_as_surface)
+            predictions = model(image_as_tensor)
+
+            boxes = predictions[0]['boxes']
+            labels_as_tensor = predictions[0]['labels']
+            scores = predictions[0]['scores']
+
 
             # ball movement controls
             if ball.x <= 0 or ball.x + ball.radius * 2 >= WIDTH:
