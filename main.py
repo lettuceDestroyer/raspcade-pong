@@ -1,13 +1,16 @@
 import os
 import sys
+import torch
 import pygame
+import pygame.camera
 from src.classes.Ball import Ball
 from src.classes.Paddle import Paddle
 
-pygame.init()
-
+# Constants
 WIDTH, HEIGHT = 1000, 600
-pygame.display.set_caption("PingPong")
+MODEL_PATH = "./model.pth"
+
+# Variables
 window = pygame.display.set_mode((WIDTH, HEIGHT))
 is_game_running: bool = True
 is_game_over: bool = False
@@ -18,11 +21,10 @@ ball = Ball(pygame.Color("white"), 15, WIDTH / 2 - 15, HEIGHT / 2 - 15, 0.5, 0.5
 
 game_over_font: pygame.font.Font
 
-try:
-    game_over_font = pygame.font.Font(os.path.join("res", "fonts", "faster_one", "faster_one_regular.ttf"), 80)
-except FileNotFoundError:
-    game_over_font = pygame.font.SysFont(None, 80)
-
+def init():
+    pygame.init()
+    pygame.camera.init()
+    pygame.display.set_caption("PingPong")
 
 def game_over():
     window.fill(pygame.Color("black"))
@@ -30,6 +32,11 @@ def game_over():
     window.blit(game_over_text, ((WIDTH - game_over_text.get_width()) / 2, (HEIGHT - game_over_text.get_height()) / 2))
     pygame.display.update()
 
+def load_fonts():
+    try:
+        game_over_font = pygame.font.Font(os.path.join("res", "fonts", "faster_one", "faster_one_regular.ttf"), 80)
+    except FileNotFoundError:
+        game_over_font = pygame.font.SysFont(None, 80)
 
 def main():
     global is_game_over
@@ -41,8 +48,8 @@ def main():
         if not is_game_over:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
+                    pygame.camera.quit()
                     pygame.quit()
-                    sys.exit()
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_UP:
                         right_paddle.velocity = -0.7
