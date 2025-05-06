@@ -7,6 +7,10 @@ import pygame.camera
 from src.classes.Ball import Ball
 from src.classes.Paddle import Paddle
 
+if os.name == "nt":
+    import cv2
+    import numpy
+
 # Constants
 WIDTH, HEIGHT = 1000, 600
 MODEL_PATH = "./model.pth"
@@ -23,7 +27,7 @@ score: int
 high_score: int
 
 model: any
-camera: pygame.camera.Camera
+camera: any
 game_over_font: pygame.font.Font
 default_font: pygame.font.Font
 
@@ -91,18 +95,30 @@ def update_score(score: int):
     window.blit(score_text, (0,0))
 
 def load_model():
-    model = torch.load(MODEL_PATH, weights_only=False)
+    if torch.cuda.is_available():
+        model = torch.load(MODEL_PATH, weights_only=False)
+    else:
+        model = torch.load(MODEL_PATH, weights_only=False, map_location=torch.device("cpu"))
     model.eval()
 
-def init_camera():
+def init_camera_on_linux():
+    global camera
+
     camera_list = pygame.camera.list_cameras()
-
-    print(f"camera_list: {camera_list}")
-
     if not camera_list:
         raise ValueError("Sorry, no cameras detected.")
     camera = pygame.camera.Camera(camera_list[0])
     camera.start()
+
+def init_camera_on_windows():
+    global camera
+    camera = cv2.VideoCapture(0)
+
+def init_camera():
+    if os.name == "nt":
+        init_camera_on_windows()
+    else:
+        init_camera_on_linux()
 
 def resize_image_and_bbox(img, bboxes, new_height, new_width):
     original_width, original_height = img.size
@@ -130,18 +146,40 @@ def surfact_to_tensor(surface: pygame.Surface):
     tensor = torch.tensor(pixel_array, dtype=torch.float32)
     # If needed, permute the dimensions to match the typical (C, H, W) format
     tensor = tensor.permute(2, 0, 1)
-    # Should print torch.Size([3, .., ..])
-    print(tensor.shape)
     return tensor
 
 def translate_box(bbox: torch.Tensor):
-
     xmin = bbox[0] * HEIGHT/640
     ymin = bbox[1] * HEIGHT/640
     xmax = bbox[2] * HEIGHT/640
     ymax = bbox[3] * HEIGHT/640
 
     return torch.Tensor([xmin, ymin, xmax, ymax])
+
+def take_image_on_linux():
+    global camera
+
+    image_as_surface = camera.get_image()
+    return image_as_surface
+
+def take_image_on_windows() -> numpy.ndarray:
+    global camera
+
+    _, img = camera.read()
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    img = numpy.rot90(img)
+
+    img_as_surface = pygame.image.frombuffer(img.tobytes(), img.shape[1::-1], "RGB")
+
+    print(type(img_as_surface))
+
+    return img_as_surface
+
+def take_image():
+    if os.name == "nt":
+        take_image_on_windows()
+    else:
+        take_image_on_linux()
 
 def main():
     global is_game_over
@@ -152,8 +190,10 @@ def main():
     load_model()
 
     while True:
-        image_as_surface = camera.get_image()
-        image_as_tensor = surfact_to_tensor(image_as_surface)
+        img = take_image()
+        print(type(img))
+        image_as_tensor = surfact_to_tensor(img)
+
         predictions = model(image_as_tensor)
 
         bboxes = predictions[0]['boxes']
@@ -165,6 +205,7 @@ def main():
         else:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
+                    if os.name == "nt": camera.release()
                     pygame.camera.quit()
                     pygame.quit()
                 elif event.type == pygame.KEYDOWN:
