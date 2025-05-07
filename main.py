@@ -191,22 +191,31 @@ def main():
     global high_score
 
     init()
-    init_camera()
+    # init_camera()
     load_fonts()
-    load_model()
+    # load_model()
 
     while True:
-        img = take_image()
-        image_as_tensor = surfact_to_tensor(img)
+        # img = take_image()
+        # image_as_tensor = surfact_to_tensor(img)
 
-        predictions = model([image_as_tensor])
+        # predictions = model([image_as_tensor])
 
-        bboxes = predictions[0]['boxes']
+        # bboxes = predictions[0]['boxes']
     
-        if is_game_over and len(bboxes) <= 0:
+        # if is_game_over and len(bboxes) <= 0:
+        #     game_over()
+        # elif is_game_over and len(bboxes) >= 1:
+        #     reload_game()
+
+        for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    if os.name == "nt": camera.release()
+                    pygame.camera.quit()
+                    pygame.quit()
+
+        if is_game_over:
             game_over()
-        elif is_game_over and len(bboxes) >= 1:
-            reload_game()
         else:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
@@ -222,14 +231,12 @@ def main():
                     right_paddle.velocity = 0
                     right_paddle.velocity = 0
 
+            # bbox: torch.Tensor = None
+            # if len(bboxes) > 0:
+            #     bbox = translate_box(bboxes[0])
 
-
-            bbox: torch.Tensor = None
-            if len(bboxes) > 0:
-                bbox = translate_box(bboxes[0])
-
-                y = (bbox[1] + bbox[3])/2
-                left_paddle.y = y - left_paddle.height / 2
+            #     y = (bbox[1] + bbox[3])/2
+            #     left_paddle.y = y - left_paddle.height / 2
 
             # ball movement controls
             if ball.x <= 0 or ball.x + ball.radius * 2 >= WIDTH:
