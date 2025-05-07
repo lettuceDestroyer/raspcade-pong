@@ -88,15 +88,17 @@ def load_fonts():
         default_font = pygame.font.SysFont(None, 80)
 
 def update_score(score: int):
+    global high_score
+
     if score > high_score:
         high_score = score
     
-    score_text = default_font.render(f"high score: {high_score} | score: {score}", True, pygame.Color("white"))
+    score_text = default_font.render(f"  high score: {high_score} | score: {score}", True, pygame.Color("white"))
     window.blit(score_text, (0,0))
 
 def load_model():
     global model
-    
+
     if torch.cuda.is_available():
         model = torch.load(MODEL_PATH, weights_only=False)
     else:
@@ -172,9 +174,6 @@ def take_image_on_windows() -> numpy.ndarray:
     img = numpy.rot90(img)
 
     img_as_surface = pygame.image.frombuffer(img.tobytes(), img.shape[1::-1], "RGB")
-
-    print(type(img_as_surface))
-
     return img_as_surface
 
 def take_image():
@@ -187,6 +186,9 @@ def take_image():
 
 def main():
     global is_game_over
+    global model
+    global score
+    global high_score
 
     init()
     init_camera()
@@ -194,13 +196,10 @@ def main():
     load_model()
 
     while True:
-        global model
-
         img = take_image()
-        print(type(img))
         image_as_tensor = surfact_to_tensor(img)
 
-        predictions = model(image_as_tensor)
+        predictions = model([image_as_tensor])
 
         bboxes = predictions[0]['boxes']
     
@@ -280,7 +279,7 @@ def main():
             right_paddle.draw(window)
 
             # update score
-            update_score()
+            update_score(score)
 
             # update screen
             pygame.display.update()
