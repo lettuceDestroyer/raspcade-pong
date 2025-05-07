@@ -95,6 +95,8 @@ def update_score(score: int):
     window.blit(score_text, (0,0))
 
 def load_model():
+    global model
+    
     if torch.cuda.is_available():
         model = torch.load(MODEL_PATH, weights_only=False)
     else:
@@ -177,9 +179,11 @@ def take_image_on_windows() -> numpy.ndarray:
 
 def take_image():
     if os.name == "nt":
-        take_image_on_windows()
+        img = take_image_on_windows()
+        return img
     else:
-        take_image_on_linux()
+        img = take_image_on_linux()
+        return img
 
 def main():
     global is_game_over
@@ -190,6 +194,8 @@ def main():
     load_model()
 
     while True:
+        global model
+
         img = take_image()
         print(type(img))
         image_as_tensor = surfact_to_tensor(img)
