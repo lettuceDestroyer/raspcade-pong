@@ -1,43 +1,56 @@
-import os
-import sys
-import torch
-from torchvision import transforms
-import pygame
-import pygame.camera
 from src.classes.Ball import Ball
 from src.classes.Paddle import Paddle
-
-if os.name == "nt":
-    import cv2
-    import numpy
+from torchvision import transforms
+import os
+import pygame
+import pygame.camera
+import sys
+import torch
 
 # Constants
-WIDTH, HEIGHT = 1000, 600
 MODEL_PATH = "./model.pth"
 
 # Variables
-window = pygame.display.set_mode((WIDTH, HEIGHT))
-is_game_running: bool = True
-is_game_over: bool = False
+width: int
+height: int
+window = pygame.display
+is_game_over: bool
 
-left_paddle = Paddle(pygame.Color("red"), 20, 120, 0, 80, (HEIGHT - 120) / 2)
-right_paddle = Paddle(pygame.Color("blue"), 20, 120, 0, WIDTH - 80 - 20, (HEIGHT - 120) / 2)
-ball = Ball(pygame.Color("white"), 15, WIDTH / 2 - 15, HEIGHT / 2 - 15, 0.5, 0.5)
+left_paddle : Paddle
+right_paddle : Paddle
+ball : Ball
 score: int
 high_score: int
 
 model: any
-camera: any
+camera: pygame.camera.Camera
 game_over_font: pygame.font.Font
 default_font: pygame.font.Font
 
 def init():
-    global score
+    global ball
+    global height
     global high_score
+    global is_game_over
+    global left_paddle
+    global right_paddle
+    global score
+    global width
+    global window
 
     pygame.init()
     pygame.camera.init()
     pygame.display.set_caption("Raspcade Pong")
+
+    window = pygame.display.set_mode((0,0), pygame.FULLSCREEN)
+    width = window.get_width()
+    height = window.get_height()
+
+    is_game_over = False
+
+    left_paddle = Paddle(pygame.Color("red"), 20, 120, 0, 80, (height - 120) / 2)
+    right_paddle = Paddle(pygame.Color("blue"), 20, 120, 0, width - 80 - 20, (width - 120) / 2)
+    ball = Ball(pygame.Color("white"), 15, height / 2 - 15, height / 2 - 15, 0.5, 0.5)
 
     score = 0
     high_score = 0
@@ -45,7 +58,7 @@ def init():
 def game_over():
     window.fill(pygame.Color("black"))
     game_over_text = game_over_font.render("Game over!", False, pygame.Color("red"))
-    window.blit(game_over_text, ((WIDTH - game_over_text.get_width()) / 2, (HEIGHT - game_over_text.get_height()) / 2))
+    window.blit(game_over_text, ((width - game_over_text.get_width()) / 2, (width - game_over_text.get_height()) / 2))
     pygame.display.update()
 
 def reload_game():
@@ -61,11 +74,11 @@ def reload_game():
 
         # Render the main text
         main_text = default_font.render("Hand recognised. Game starting in", True, pygame.Color("white"))
-        window.blit(main_text, ((WIDTH - main_text.get_width()) / 2, (HEIGHT - main_text.get_height()) / 2))
+        window.blit(main_text, ((width - main_text.get_width()) / 2, (height - main_text.get_height()) / 2))
 
         # Render the countdown number
         countdown_text = default_font.render(str(count), True, pygame.Color("white"))
-        window.blit(countdown_text, ((WIDTH - main_text.get_width()) / 2, ((HEIGHT - main_text.get_height()) / 2)) + main_text.get_height() + 10)
+        window.blit(countdown_text, ((width - main_text.get_width()) / 2, ((height - main_text.get_height()) / 2)) + main_text.get_height() + 10)
 
         pygame.display.flip()
         pygame.time.wait(1000)
@@ -105,7 +118,7 @@ def load_model():
         model = torch.load(MODEL_PATH, weights_only=False, map_location=torch.device("cpu"))
     model.eval()
 
-def init_camera_on_linux():
+def init_camera():
     global camera
 
     camera_list = pygame.camera.list_cameras()
@@ -113,16 +126,6 @@ def init_camera_on_linux():
         raise ValueError("Sorry, no cameras detected.")
     camera = pygame.camera.Camera(camera_list[0])
     camera.start()
-
-def init_camera_on_windows():
-    global camera
-    camera = cv2.VideoCapture(0)
-
-def init_camera():
-    if os.name == "nt":
-        init_camera_on_windows()
-    else:
-        init_camera_on_linux()
 
 def resize_image_and_bbox(img, bboxes, new_height, new_width):
     original_width, original_height = img.size
@@ -153,42 +156,29 @@ def surfact_to_tensor(surface: pygame.Surface):
     return tensor
 
 def translate_box(bbox: torch.Tensor):
-    xmin = bbox[0] * HEIGHT/640
-    ymin = bbox[1] * HEIGHT/640
-    xmax = bbox[2] * HEIGHT/640
-    ymax = bbox[3] * HEIGHT/640
+    xmin = bbox[0] * height/640
+    ymin = bbox[1] * height/640
+    xmax = bbox[2] * height/640
+    ymax = bbox[3] * height/640
 
     return torch.Tensor([xmin, ymin, xmax, ymax])
 
-def take_image_on_linux():
+def take_image():
     global camera
 
     image_as_surface = camera.get_image()
     return image_as_surface
-
-def take_image_on_windows() -> numpy.ndarray:
-    global camera
-
-    _, img = camera.read()
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    img = numpy.rot90(img)
-
-    img_as_surface = pygame.image.frombuffer(img.tobytes(), img.shape[1::-1], "RGB")
-    return img_as_surface
-
-def take_image():
-    if os.name == "nt":
-        img = take_image_on_windows()
-        return img
-    else:
-        img = take_image_on_linux()
-        return img
 
 def main():
     global is_game_over
     global model
     global score
     global high_score
+
+    pygame.camera.init()
+
+    camera_list = pygame.camera.list_cameras()
+    print(camera_list)
 
     init()
     init_camera()
@@ -232,20 +222,20 @@ def main():
                 left_paddle.y = y - left_paddle.height / 2
 
             # ball movement controls
-            if ball.x <= 0 or ball.x + ball.radius * 2 >= WIDTH:
+            if ball.x <= 0 or ball.x + ball.radius * 2 >= width:
                 is_game_over = True
 
-            if ball.y <= 0 or ball.rect.y >= HEIGHT - ball.radius:
+            if ball.y <= 0 or ball.rect.y >= height - ball.radius:
                 ball.y_velocity *= -1
 
             # make sure paddle does not go outside the window
-            if left_paddle.y + left_paddle.height >= HEIGHT:
-                left_paddle.y = HEIGHT - left_paddle.height
+            if left_paddle.y + left_paddle.height >= height:
+                left_paddle.y = height - left_paddle.height
             if left_paddle.y < 0:
                 left_paddle.y = 0
 
-            if right_paddle.y + right_paddle.height > HEIGHT:
-                right_paddle.y = HEIGHT - right_paddle.height
+            if right_paddle.y + right_paddle.height > height:
+                right_paddle.y = height - right_paddle.height
             if right_paddle.y < 0:
                 right_paddle.y = 0
 
@@ -258,7 +248,7 @@ def main():
                 ball.x_velocity *= -1
 
             # move left paddle based on ball location
-            if ball.x <= WIDTH / 2:
+            if ball.x <= width / 2:
                 if left_paddle.y + left_paddle.height / 2 < ball.y:
                     left_paddle.velocity = 0.9
                 else:
@@ -283,7 +273,6 @@ def main():
 
             # update screen
             pygame.display.update()
-
 
 if __name__ == '__main__':
     main()
