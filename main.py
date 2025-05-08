@@ -1,11 +1,12 @@
 from src.classes.Ball import Ball
 from src.classes.Paddle import Paddle
 from torchvision import transforms
+import numpy
 import os
 import pygame
 import pygame.camera
-import sys
 import torch
+import torch.multiprocessing as multiprocessing
 
 # Constants
 MODEL_PATH = "./model.pth"
@@ -27,12 +28,17 @@ camera: pygame.camera.Camera
 game_over_font: pygame.font.Font
 default_font: pygame.font.Font
 
+queue: multiprocessing.Queue
+process: multiprocessing.Process
+
 def init():
     global ball
     global height
     global high_score
     global is_game_over
     global left_paddle
+    global process
+    global queue
     global right_paddle
     global score
     global width
@@ -49,34 +55,32 @@ def init():
     is_game_over = False
 
     left_paddle = Paddle(pygame.Color("red"), 20, 120, 0, 80, (height - 120) / 2)
-    right_paddle = Paddle(pygame.Color("blue"), 20, 120, 0, width - 80 - 20, (width - 120) / 2)
-    ball = Ball(pygame.Color("white"), 15, height / 2 - 15, height / 2 - 15, 0.5, 0.5)
+    right_paddle = Paddle(pygame.Color("blue"), 20, 120, 0, width - 80 - 20, (height - 120) / 2)
+    ball = Ball(pygame.Color("white"), 15, width / 2 - 15, height / 2 - 15, 0.5, 0.5)
 
     score = 0
     high_score = 0
 
+    queue = multiprocessing.Queue()
+    process = None
+
 def game_over():
     window.fill(pygame.Color("black"))
     game_over_text = game_over_font.render("Game over!", False, pygame.Color("red"))
-    window.blit(game_over_text, ((width - game_over_text.get_width()) / 2, (width - game_over_text.get_height()) / 2))
+    window.blit(game_over_text, ((width - game_over_text.get_width()) / 2, (height - game_over_text.get_height()) / 2))
     pygame.display.update()
 
 def reload_game():
     global score
 
+    window.fill(pygame.Color("black"))
+
+    # Render the main text
+    main_text = default_font.render("Hand recognised. Game starting in", True, pygame.Color("white"))
+    window.blit(main_text, ((width - main_text.get_width()) / 2, (height - main_text.get_height()) / 2))
+
+    # Render the countdown number
     for count in range(3, 0, -1):
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                pygame.quit()
-                sys.exit()
-
-        window.fill(pygame.Color("black"))
-
-        # Render the main text
-        main_text = default_font.render("Hand recognised. Game starting in", True, pygame.Color("white"))
-        window.blit(main_text, ((width - main_text.get_width()) / 2, (height - main_text.get_height()) / 2))
-
-        # Render the countdown number
         countdown_text = default_font.render(str(count), True, pygame.Color("white"))
         window.blit(countdown_text, ((width - main_text.get_width()) / 2, ((height - main_text.get_height()) / 2)) + main_text.get_height() + 10)
 
@@ -105,7 +109,7 @@ def update_score(score: int):
 
     if score > high_score:
         high_score = score
-    
+
     score_text = default_font.render(f"  high score: {high_score} | score: {score}", True, pygame.Color("white"))
     window.blit(score_text, (0,0))
 
@@ -147,13 +151,25 @@ def resize_image_and_bbox(img, bboxes, new_height, new_width):
     return img_as_tensor, bboxes
 
 def surfact_to_tensor(surface: pygame.Surface):
-    # Use surfarray to get the pixel data
+    # Use surfarray to get the pixel data (shape: [W, H, C], dtype: uint8)
     pixel_array = pygame.surfarray.pixels3d(surface)
-    # Convert the numpy array to a PyTorch tensor
-    tensor = torch.tensor(pixel_array, dtype=torch.float32)
-    # If needed, permute the dimensions to match the typical (C, H, W) format
-    tensor = tensor.permute(2, 0, 1)
+    # Ensure positive strides and convert to float32, normalize to [0, 1]
+    pixel_array = pixel_array.copy().astype(numpy.float32) / 255.0
+    # Convert to PyTorch tensor and permute to (C, H, W)
+    tensor = torch.from_numpy(pixel_array).permute(2, 1, 0)
     return tensor
+
+def tensor_to_surface(tensor: torch.Tensor):
+    # Ensure it's a uint8 tensor in (3, H, W) format
+    if tensor.dtype != torch.uint8:
+        tensor = (tensor.clamp(0, 1) * 255).to(torch.uint8)
+    # Convert to (H, W, 3) for NumPy
+    pixel_array = tensor.permute(1, 2, 0).cpu().numpy()
+    # Transpose to (W, H, 3) for pygame
+    pixel_array = numpy.transpose(pixel_array, (1, 0, 2))
+    # Create a surface
+    surface = pygame.surfarray.make_surface(pixel_array.copy())
+    return surface
 
 def translate_box(bbox: torch.Tensor):
     xmin = bbox[0] * height/640
@@ -169,57 +185,65 @@ def take_image():
     image_as_surface = camera.get_image()
     return image_as_surface
 
-def main():
+def predict_bbox(img: torch.Tensor, model: any, queue: multiprocessing.Queue):
+    with torch.no_grad():
+        predictions = model([img])
+        print(predictions)
+        bboxes = predictions[0]['boxes']
+
+        if len(bboxes) > 0:
+            queue.put(bboxes[0])
+
+def run_game():
     global is_game_over
     global model
     global score
     global high_score
-
-    pygame.camera.init()
-
-    camera_list = pygame.camera.list_cameras()
-    print(camera_list)
-
-    init()
-    init_camera()
-    load_fonts()
-    load_model()
+    global process
 
     while True:
-        img = take_image()
-        image_as_tensor = surfact_to_tensor(img)
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.camera.quit()
+                pygame.quit()
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_UP:
+                    right_paddle.velocity = -0.7
+                if event.key == pygame.K_DOWN:
+                    right_paddle.velocity = 0.7
+            elif event.type == pygame.KEYUP:
+                right_paddle.velocity = 0
+                right_paddle.velocity = 0
 
-        predictions = model([image_as_tensor])
+        if process is None or not process.is_alive():
+            img = take_image()
+            img = pygame.transform.rotate(img, 90)
+            img_as_tensor = surfact_to_tensor(img)
+            process = multiprocessing.Process(target=predict_bbox, args=(img_as_tensor, model, queue))
+            process.start()
 
-        bboxes = predictions[0]['boxes']
-    
+        if not queue.empty():
+            bbox = queue.get()
+            print(f"got bbox")
+        # img = take_image()
+        # img = pygame.transform.rotate(img, 90)
+        # img_as_tensor = surfact_to_tensor(img)
+
+        # predictions = model([img_as_tensor])
+        # bboxes = predictions[0]['boxes']
+
+        bboxes = []
+
         if is_game_over and len(bboxes) <= 0:
             game_over()
         elif is_game_over and len(bboxes) >= 1:
             reload_game()
         else:
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    if os.name == "nt": camera.release()
-                    pygame.camera.quit()
-                    pygame.quit()
-                elif event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_UP:
-                        right_paddle.velocity = -0.7
-                    if event.key == pygame.K_DOWN:
-                        right_paddle.velocity = 0.7
-                elif event.type == pygame.KEYUP:
-                    right_paddle.velocity = 0
-                    right_paddle.velocity = 0
+            # if len(bboxes) > 0:
+            #     bbox = translate_box(bboxes[0])
 
-
-
-            bbox: torch.Tensor = None
-            if len(bboxes) > 0:
-                bbox = translate_box(bboxes[0])
-
-                y = (bbox[1] + bbox[3])/2
-                left_paddle.y = y - left_paddle.height / 2
+            #     y = (bbox[1] + bbox[3])/2
+            #     left_paddle.y = y
 
             # ball movement controls
             if ball.x <= 0 or ball.x + ball.radius * 2 >= width:
@@ -241,10 +265,32 @@ def main():
 
             # check if paddle and ball collide
             if pygame.sprite.collide_rect(left_paddle, ball):
+                
+                if ball.x_velocity > 0:
+                    ball.x_velocity += 0.05
+                else:
+                    ball.x_velocity -= 0.05
+
+                if ball.y_velocity > 0:
+                    ball.y_velocity += 0.05
+                else:
+                    ball.y_velocity -= 0.05
+
                 ball.x_velocity *= -1
 
             if pygame.sprite.collide_rect(ball, right_paddle):
                 score += 1
+
+                if ball.x_velocity > 0:
+                    ball.x_velocity += 0.05
+                else:
+                    ball.x_velocity -= 0.05
+
+                if ball.y_velocity > 0:
+                    ball.y_velocity += 0.05
+                else:
+                    ball.y_velocity -= 0.05
+
                 ball.x_velocity *= -1
 
             # move left paddle based on ball location
@@ -271,8 +317,15 @@ def main():
             # update score
             update_score(score)
 
-            # update screen
-            pygame.display.update()
+        # update screen
+        pygame.display.update()
+
+def main():
+    init()
+    init_camera()
+    load_fonts()
+    load_model()
+    run_game()
 
 if __name__ == '__main__':
     main()
