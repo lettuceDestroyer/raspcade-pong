@@ -1,5 +1,3 @@
-pygame
+pygame-ce
 torch
 torchvision
-opencv-python; platform_system == "Windows"
-numpy; platform_system == "Windows"
