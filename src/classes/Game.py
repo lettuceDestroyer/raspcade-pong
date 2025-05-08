@@ -130,6 +130,9 @@ class Game():
                     pygame.camera.quit()
                     pygame.quit()
                 elif event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_ESCAPE:
+                        pygame.camera.quit()
+                        pygame.quit()
                     if event.key == pygame.K_UP:
                         self.right_paddle.velocity = -0.7
                     if event.key == pygame.K_DOWN:
