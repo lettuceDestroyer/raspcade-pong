@@ -1,15 +1,25 @@
 from src.classes.Ball import Ball
 from src.classes.Paddle import Paddle
-from torchvision import transforms
+from src.modules.predictor import predict_bbox
+import torchvision
 import numpy
 import os
 import pygame
 import pygame.camera
 import torch
 import torch.multiprocessing as multiprocessing
+import PIL
 
 # Constants
 MODEL_PATH = "./model.pth"
+
+IMAGE_WIDTH = 800
+IMAGE_HEIGHT = 640
+
+TRANSFORM = torchvision.transforms.Compose([
+    torchvision.transforms.Resize((IMAGE_HEIGHT, IMAGE_WIDTH)),
+    torchvision.transforms.ToTensor()
+])
 
 # Variables
 width: int
@@ -82,8 +92,10 @@ def reload_game():
     # Render the countdown number
     for count in range(3, 0, -1):
         countdown_text = default_font.render(str(count), True, pygame.Color("white"))
-        window.blit(countdown_text, ((width - main_text.get_width()) / 2, ((height - main_text.get_height()) / 2)) + main_text.get_height() + 10)
+        x = (width - countdown_text.get_width()) / 2
+        y = (height - main_text.get_height()) / 2 + main_text.get_height() + 10
 
+        window.blit(countdown_text, (x, y))
         pygame.display.flip()
         pygame.time.wait(1000)
 
@@ -137,9 +149,9 @@ def resize_image_and_bbox(img, bboxes, new_height, new_width):
     height_factor = original_height / new_height
     width_factor = original_width / new_width
 
-    transform = transforms.Compose([
-        transforms.Resize((new_height, new_width)),
-        transforms.ToTensor()
+    transform = torchvision.transforms.Compose([
+        torchvision.transforms.Resize((new_height, new_width)),
+        torchvision.transforms.ToTensor()
     ])
     img_as_tensor = transform(img)
 
@@ -185,15 +197,6 @@ def take_image():
     image_as_surface = camera.get_image()
     return image_as_surface
 
-def predict_bbox(img: torch.Tensor, model: any, queue: multiprocessing.Queue):
-    with torch.no_grad():
-        predictions = model([img])
-        print(predictions)
-        bboxes = predictions[0]['boxes']
-
-        if len(bboxes) > 0:
-            queue.put(bboxes[0])
-
 def run_game():
     global is_game_over
     global model
@@ -218,32 +221,30 @@ def run_game():
         if process is None or not process.is_alive():
             img = take_image()
             img = pygame.transform.rotate(img, 90)
-            img_as_tensor = surfact_to_tensor(img)
+            img = pygame.surfarray.array3d(img)
+            img = PIL.Image.fromarray(img)
+            img_as_tensor = TRANSFORM(img)
             process = multiprocessing.Process(target=predict_bbox, args=(img_as_tensor, model, queue))
             process.start()
 
+        bbox = None
+
         if not queue.empty():
             bbox = queue.get()
-            print(f"got bbox")
-        # img = take_image()
-        # img = pygame.transform.rotate(img, 90)
-        # img_as_tensor = surfact_to_tensor(img)
 
-        # predictions = model([img_as_tensor])
-        # bboxes = predictions[0]['boxes']
-
-        bboxes = []
-
-        if is_game_over and len(bboxes) <= 0:
+        if is_game_over and bbox is None:
             game_over()
-        elif is_game_over and len(bboxes) >= 1:
+        elif is_game_over and bbox is not None:
             reload_game()
         else:
-            # if len(bboxes) > 0:
-            #     bbox = translate_box(bboxes[0])
+            if bbox is not None:
+                bbox = translate_box(bbox)
+                y = int(bbox[1])
+                print(f"y: {y}")
 
-            #     y = (bbox[1] + bbox[3])/2
-            #     left_paddle.y = y
+                print(f"right_paddle.y: {right_paddle.y}")
+                right_paddle.y = y
+                print(f"right_paddle.y: {right_paddle.y}")
 
             # ball movement controls
             if ball.x <= 0 or ball.x + ball.radius * 2 >= width:
