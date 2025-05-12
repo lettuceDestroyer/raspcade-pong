@@ -1,8 +1,9 @@
 import torch.multiprocessing as multiprocessing
+from multiprocessing.connection import Connection
 from src.classes.Ball import Ball
 from src.classes.Paddle import Paddle
 from src.modules.predictor import predict_bbox
-from src.modules.utils import translate_bbox
+from src.modules.utils import translate_bbox, surface_to_tensor
 import torchvision
 import numpy
 import os
@@ -17,8 +18,12 @@ MODEL_PATH = "./model.pth"
 IMAGE_WIDTH = 800
 IMAGE_HEIGHT = 640
 
-class Game():
-    def __init__(self):
+class Game:
+    def __init__(self, parent_connection: Connection, child_connection: Connection):
+        self.parent_connection = parent_connection
+        self.child_connection = child_connection
+        self.should_run = False
+
         pygame.init()
         pygame.camera.init()
         pygame.display.set_caption("Raspcade Pong")
@@ -40,11 +45,6 @@ class Game():
         self.model = None
         self.queue = multiprocessing.Queue()
         self.process = None
-
-        self.transform = torchvision.transforms.Compose([
-            torchvision.transforms.Resize((IMAGE_HEIGHT, IMAGE_WIDTH)),
-            torchvision.transforms.ToTensor()
-        ])
 
     def game_over(self):
         self.window.fill(pygame.Color("black"))
@@ -140,19 +140,16 @@ class Game():
                 elif event.type == pygame.KEYUP:
                     self.right_paddle.velocity = 0
 
-            if self.process is None or not self.process.is_alive():
-                img = self.take_image()
-                img = pygame.transform.rotate(img, 90)
-                img = pygame.surfarray.array3d(img)
-                img = PIL.Image.fromarray(img)
-                img_as_tensor = self.transform(img)
-                self.process = multiprocessing.Process(target=predict_bbox, args=(img_as_tensor, self.model, self.queue))
-                self.process.start()
-
             bbox = None
+            img = self.take_image()
+            img = pygame.transform.rotate(img, 90)
+            img = pygame.surfarray.array3d(img)
+            img = PIL.Image.fromarray(img)
+            img_as_tensor = surface_to_tensor(img)
 
-            if not self.queue.empty():
-                bbox = self.queue.get()
+            if self.parent_connection.poll():
+                bbox = self.parent_connection.recv()
+                self.parent_connection.send(img_as_tensor)
 
             if self.is_game_over and bbox is None:
                 self.game_over()
@@ -242,3 +239,8 @@ class Game():
 
             # update screen
             pygame.display.update()
+
+    def start(self):
+        self.init_camera()
+        self.load_fonts()
+        self.run_game()
