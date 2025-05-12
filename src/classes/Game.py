@@ -53,14 +53,13 @@ class Game():
         pygame.display.update()
 
     def reload_game(self):
-        self.window.fill(pygame.Color("black"))
-
-        # Render the main text
-        main_text = default_font.render("Hand recognised. Game starting in", True, pygame.Color("white"))
-        self.window.blit(main_text, ((self.width - main_text.get_width()) / 2, (self.height - main_text.get_height()) / 2))
-
         # Render the countdown number
         for count in range(3, 0, -1):
+            self.window.fill(pygame.Color("black"))
+            # Render the main text
+            main_text = default_font.render("Hand recognised. Game starting in", True, pygame.Color("white"))
+            self.window.blit(main_text, ((self.width - main_text.get_width()) / 2, (self.height - main_text.get_height()) / 2))
+            # Render countdown
             countdown_text = default_font.render(str(count), True, pygame.Color("white"))
             x = (self.width - countdown_text.get_width()) / 2
             y = (self.height - main_text.get_height()) / 2 + main_text.get_height() + 10
@@ -69,8 +68,14 @@ class Game():
             pygame.display.flip()
             pygame.time.wait(1000)
 
+        self.left_paddle.y = (self.height - 120) / 2
+        self.right_paddle.y = (self.height - 120) / 2
+        self.ball.x = self.width / 2 - 15
+        self.ball.y = self.height / 2 - 15
+        self.ball.x_velocity = 0.5
+        self.ball.y_velocity = 0.5
         self.score = 0
-        self.run_game()
+        self.is_game_over = False
 
     def load_fonts(self):
         global game_over_font
@@ -132,10 +137,12 @@ class Game():
         self.parent_connection.send(img_as_tensor)
 
     def run_game(self):
-        self.predictor = Predictor(self.child_connection, self.parent_connection, self.model)
-        self.process = multiprocessing.Process(target=self.predictor.start)
-        self.process.start()
-        self.send_img()
+
+        if self.predictor is None:
+            self.predictor = Predictor(self.child_connection, self.parent_connection, self.model)
+            self.process = multiprocessing.Process(target=self.predictor.start)
+            self.process.start()
+            self.send_img()
 
         while True:
             for event in pygame.event.get():
@@ -159,10 +166,10 @@ class Game():
                 bbox = self.parent_connection.recv()
                 self.send_img()
 
-            if self.is_game_over and bbox is None:
-                self.game_over()
-            elif self.is_game_over and bbox is not None:
+            if self.is_game_over and bbox is not None:
                 self.reload_game()
+            elif self.is_game_over:
+                self.game_over()
             else:
                 if bbox is not None:
                     bbox = translate_bbox(bbox, self.height)
