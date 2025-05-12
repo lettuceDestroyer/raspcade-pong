@@ -1,7 +1,7 @@
 import torch.multiprocessing as multiprocessing
 from src.classes.Ball import Ball
 from src.classes.Paddle import Paddle
-from src.modules.predictor import predict_bbox
+from src.classes.Predictor import Predictor
 from src.modules.utils import translate_bbox, img_to_tensor
 import torchvision
 import numpy
@@ -9,7 +9,9 @@ import os
 import pygame
 import pygame.camera
 import torch
-import PIL
+from PIL import Image
+from multiprocessing import Pipe
+from multiprocessing.connection import Connection
 
 # Constants
 MODEL_PATH = "./model.pth"
@@ -40,6 +42,9 @@ class Game():
         self.model = None
         self.queue = multiprocessing.Queue()
         self.process = None
+        self.predictor = None
+
+        self.parent_connection, self.child_connection = Pipe()
 
     def game_over(self):
         self.window.fill(pygame.Color("black"))
@@ -118,7 +123,20 @@ class Game():
         image_as_surface = self.camera.get_image()
         return image_as_surface
 
+    def send_img(self):
+        img = self.take_image()
+        img = pygame.transform.rotate(img, 90)
+        img = pygame.surfarray.array3d(img)
+        img = Image.fromarray(img)
+        img_as_tensor = img_to_tensor(img)
+        self.parent_connection.send(img_as_tensor)
+
     def run_game(self):
+        self.predictor = Predictor(self.child_connection, self.parent_connection, self.model)
+        self.process = multiprocessing.Process(target=self.predictor.start)
+        self.process.start()
+        self.send_img()
+
         while True:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
@@ -135,19 +153,11 @@ class Game():
                 elif event.type == pygame.KEYUP:
                     self.right_paddle.velocity = 0
 
-            if self.process is None or not self.process.is_alive():
-                img = self.take_image()
-                img = pygame.transform.rotate(img, 90)
-                img = pygame.surfarray.array3d(img)
-                img = PIL.Image.fromarray(img)
-                img_as_tensor = img_to_tensor(img)
-                self.process = multiprocessing.Process(target=predict_bbox, args=(img_as_tensor, self.model, self.queue))
-                self.process.start()
-
             bbox = None
-
-            if not self.queue.empty():
-                bbox = self.queue.get()
+            if self.parent_connection.poll():
+                print("got bbox")
+                bbox = self.parent_connection.recv()
+                self.send_img()
 
             if self.is_game_over and bbox is None:
                 self.game_over()
